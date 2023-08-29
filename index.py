@@ -1,38 +1,88 @@
-import numpy as np
+import os
 from PIL import Image
+import numpy as np
+from sklearn.metrics import mean_squared_error
 
-def compress_image(image_path, compression_ratio):
-    # Load the image
-    image = Image.open(image_path)
+def psnr(image1, image2, max_value=255):
+    mse = np.mean((image1 - image2) ** 2)
+    if mse == 0:
+        return float('inf')
+    return 20 * np.log10(max_value / np.sqrt(mse))
 
-    # Convert the image to grayscale
-    image = image.convert('L')
+def compress_image_to_jpeg(input_folder, output_folder, quality=85):
+    # Ensure output folder exists
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
 
-    # Convert the image to a numpy array
-    img_array = np.array(image)
+    # Get a list of image files in the input folder
+    image_files = [f for f in os.listdir(input_folder) if f.lower().endswith(('.jpeg', '.png', '.bmp', '.jpg'))]
 
-    # Define the compression ratio
-    rows, cols = img_array.shape
-    num_pixels = rows * cols
-    num_compressed_pixels = int(num_pixels * compression_ratio)
+    for image_file in image_files:
+        # Read original image file
+        original_image_path = os.path.join(input_folder, image_file)
+        original_image = Image.open(original_image_path)
+        original_image_array = np.array(original_image)
 
-    # Initialize the compressed image array
-    compressed_img_array = np.zeros((rows, cols))
+        # Create a reference image by saving and reading the original image
+        reference_image_path = os.path.join(output_folder, 'reference.jpg')
+        original_image.save(reference_image_path, format='JPEG', quality=100)
+        reference_image = Image.open(reference_image_path)
+        reference_image_array = np.array(reference_image)
 
-    # Generate random indices for the compressed pixels
-    indices = np.random.choice(num_pixels, size=num_compressed_pixels, replace=False)
+        # Calculate PSNR of original image with reference
+        psnr_before = psnr(original_image_array, reference_image_array, max_value=255)
 
-    # Set the compressed pixels in the compressed image array
-    compressed_img_array.flat[indices] = img_array.flat[indices]
+        # Calculate MSE of original image with reference
+        mse_before = mean_squared_error(original_image_array, reference_image_array)
 
-    # Convert the compressed image array to 8-bit integer format
-    compressed_img_array = compressed_img_array.astype(np.uint8)
+        # Save the initial size of the original image
+        initial_size = os.path.getsize(original_image_path) / 1024  # in KB
 
-    # Convert the compressed image array back to an image
-    compressed_image = Image.fromarray(compressed_img_array)
+        # Save the PSNR and MSE before compression, along with initial size
+        print(f"Image: image-{len(image_file)}")
+        print(f"Initial Size: {initial_size:.2f} KB")
+        print(f"PSNR before compression: {psnr_before:.2f} dB")
+        print(f"MSE before compression: {mse_before:.2f}")
 
-    return compressed_image
+        # Save the original image as a reference
+        original_output_file = os.path.splitext(image_file)[0] + '_original.jpg'
+        original_output_path = os.path.join(output_folder, original_output_file)
+        original_image.save(original_output_path, format='JPEG', quality=quality)
 
-# Example usage
-compressed_image = compress_image('./arya_star.png', 0.5)
-compressed_image.save('compressed_image.jpg')
+        # Read image file for compression
+        image = Image.open(original_image_path)
+
+        # Save the image as a JPEG file with the specified quality level
+        compressed_output_file = os.path.splitext(image_file)[0] + '_compressed.jpg'
+        compressed_output_path = os.path.join(output_folder, compressed_output_file)
+        image.save(compressed_output_path, format='JPEG', quality=quality)
+
+        # Calculate compressed image size
+        compressed_size = os.path.getsize(compressed_output_path) / 1024  # in KB
+
+        # Calculate compression ratio
+        compression_ratio = initial_size / compressed_size
+
+        # Read compressed image for PSNR and MSE calculation
+        compressed_image = Image.open(compressed_output_path)
+        compressed_image_array = np.array(compressed_image)
+
+        # Calculate PSNR and MSE after compression
+        psnr_after = psnr(original_image_array, compressed_image_array, max_value=255)
+        mse_after = mean_squared_error(original_image_array, compressed_image_array)
+
+        # Save the compressed size, PSNR, and MSE after compression
+        print(f"Compressed Size: {compressed_size:.2f} KB")
+        print(f"Compression Ratio: {compression_ratio:.2f}")
+        print(f"PSNR after compression: {psnr_after:.2f} dB")
+        print(f"MSE after compression: {mse_after:.2f}")
+        
+        print()
+
+    # Remove the reference image after processing all images
+    os.remove(reference_image_path)
+
+if __name__ == "__main__":
+    input_folder = "./all_doc/mri"  # Replace with the folder containing image files
+    output_folder = "./compressed_mri"  # Replace with the folder where JPEG files will be saved
+    compress_image_to_jpeg(input_folder, output_folder, quality=85)
